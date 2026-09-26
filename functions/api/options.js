@@ -7,10 +7,10 @@ export async function onRequestGet(context) {
   if (!auth) return json({ error: "unauthorized" }, 401);
 
   const [catRes, subRes, accRes, spenderRes, tagRes] = await Promise.all([
-    supabaseRequest(env, "expense_categories?select=id,name,type&order=type.asc,name.asc"),
-    supabaseRequest(env, "expense_subcategories?select=id,category_id,name&order=name.asc"),
-    supabaseRequest(env, "payment_accounts?select=id,name&order=name.asc"),
-    supabaseRequest(env, "spenders?select=id,name&order=name.asc"),
+    supabaseRequest(env, "expense_categories?select=id,name,type&order=type.asc,sort_order.asc,name.asc"),
+    supabaseRequest(env, "expense_subcategories?select=id,category_id,name&order=sort_order.asc,name.asc"),
+    supabaseRequest(env, "payment_accounts?select=id,name&order=sort_order.asc,name.asc"),
+    supabaseRequest(env, "spenders?select=id,name&order=sort_order.asc,name.asc"),
     supabaseRequest(env, "tags?select=name&order=name.asc"),
   ]);
 
