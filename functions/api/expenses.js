@@ -93,6 +93,14 @@ export async function onRequestPost(context) {
     return json({ error: "one or more used_by_ids is unknown" }, 400);
   }
 
+  // --- Generate the human-friendly YYMMNNNN transaction number ---
+  const [txnYear, txnMonth] = expense_date.split("-").map(Number);
+  const txnNoRes = await supabaseRequest(env, "rpc/next_txn_no", {
+    method: "POST",
+    body: JSON.stringify({ p_year: txnYear, p_month: txnMonth }),
+  });
+  const txnNo = txnNoRes.ok ? await txnNoRes.json() : null;
+
   // --- Upsert any brand-new tags so future dropdowns/autocomplete pick them up ---
   if (tagNames.length > 0) {
     await supabaseRequest(env, "tags", {
@@ -116,6 +124,7 @@ export async function onRequestPost(context) {
       amount: amt,
       description: desc,
       tags: tagNames,
+      txn_no: txnNo,
       telegram_user_id: auth.user.id,
       source: "telegram",
     }),
@@ -136,13 +145,13 @@ export async function onRequestPost(context) {
   const usedByText = spenderRows.length ? spenderRows.map((s) => s.name).join(", ") : "—";
 
   const lines = [
-    `<b>TRANSACTION LOGGED</b> · #${row.id}`,
-    `at ${fmtDateHuman(expense_date)} ${time} by ${escapeHtml(submittedBy)}`,
-    `${fmtIDR(amt)} on ${escapeHtml(account.name)}`,
-    `${category.type === "income" ? "Income" : "Expense"} / ${escapeHtml(category.name)} / ${escapeHtml(subcategory.name)}`,
-    `Used by ${escapeHtml(usedByText)}`,
-    `Note: ${desc ? escapeHtml(desc) : "-"}`,
-    `Tags: ${tagNames.length ? tagNames.map((t) => "#" + t).join(" ") : "-"}`,
+    `<b>TRANSACTION LOGGED</b> · #${row.txn_no || row.id}`,
+    `- at ${fmtDateHuman(expense_date)} ${time} by ${escapeHtml(submittedBy)}`,
+    `- ${fmtIDR(amt)} on ${escapeHtml(account.name)}`,
+    `- ${category.type === "income" ? "Income" : "Expense"} / ${escapeHtml(category.name)} / ${escapeHtml(subcategory.name)}`,
+    `- Used by ${escapeHtml(usedByText)}`,
+    `- Note: ${desc ? escapeHtml(desc) : "-"}`,
+    `- Tags: ${tagNames.length ? tagNames.map((t) => "#" + t).join(" ") : "-"}`,
   ];
   await notifyChat(env, lines.join("\n"));
 

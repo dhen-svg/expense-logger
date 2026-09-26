@@ -97,25 +97,24 @@ async function buildReport(env, key) {
   return "Unknown report.";
 }
 
-async function handleUndo(env, chatId, explicitId) {
-  const filter = explicitId
-    ? `id=eq.${explicitId}`
-    : "order=created_at.desc&limit=1";
-  const query = explicitId
-    ? `expense_ledger?${filter}&select=id,expense_date,amount,category_id,subcategory_id`
-    : `expense_ledger?select=id,expense_date,amount,category_id,subcategory_id&${filter}`;
+async function handleUndo(env, chatId, explicitTxnNo) {
+  // explicitTxnNo is the YYMMNNNN number shown in the notification, not the
+  // raw internal id — that's still used under the hood for the actual delete.
+  const query = explicitTxnNo
+    ? `expense_ledger?txn_no=eq.${explicitTxnNo}&select=id,txn_no,expense_date,amount,category_id,subcategory_id`
+    : "expense_ledger?select=id,txn_no,expense_date,amount,category_id,subcategory_id&order=created_at.desc&limit=1";
 
   const res = await supabaseRequest(env, query);
   if (!res.ok) return telegramApi(env, "sendMessage", { chat_id: chatId, text: "Could not look up that entry." });
   const rows = await res.json();
   if (rows.length === 0) {
-    const msg = explicitId ? `No transaction with ID #${explicitId}.` : "Nothing to undo.";
+    const msg = explicitTxnNo ? `No transaction #${explicitTxnNo}.` : "Nothing to undo.";
     return telegramApi(env, "sendMessage", { chat_id: chatId, text: msg });
   }
   const row = rows[0];
   await telegramApi(env, "sendMessage", {
     chat_id: chatId,
-    text: `Delete transaction #${row.id}?\n${row.expense_date} · ${fmtIDR(row.amount)}`,
+    text: `Delete transaction #${row.txn_no || row.id}?\n${row.expense_date} · ${fmtIDR(row.amount)}`,
     reply_markup: {
       inline_keyboard: [
         [
@@ -177,8 +176,8 @@ export async function onRequestPost(context) {
     });
   } else if (text.startsWith("/undo") || text.startsWith("/cancel")) {
     const parts = text.split(/\s+/);
-    const explicitId = parts.length > 1 && /^\d+$/.test(parts[1]) ? parts[1] : null;
-    await handleUndo(env, chatId, explicitId);
+    const explicitTxnNo = parts.length > 1 && /^\d{6,8}$/.test(parts[1]) ? parts[1] : null;
+    await handleUndo(env, chatId, explicitTxnNo);
   } else if (text.startsWith("/log")) {
     // NOTE: web_app-type buttons are rejected by Telegram in group chats
     // (BUTTON_TYPE_INVALID). MINI_APP_LINK must be the t.me/<bot>/<app>
