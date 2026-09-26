@@ -1,0 +1,85 @@
+// Shared helpers for all API functions.
+// Verifies Telegram Mini App initData per Telegram's documented HMAC scheme,
+// and wraps calls to the Supabase REST API using the server-only secret key.
+
+function bufferToHex(buffer) {
+  return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Verifies initData against the bot token. Returns { user, authDate } on
+// success, or null if the signature is invalid, missing, or stale (>24h).
+export async function verifyInitData(initData, botToken) {
+  if (!initData || !botToken) return null;
+
+  const params = new URLSearchParams(initData);
+  const hash = params.get("hash");
+  if (!hash) return null;
+  params.delete("hash");
+
+  const pairs = [];
+  for (const [key, value] of params.entries()) pairs.push(`${key}=${value}`);
+  pairs.sort();
+  const dataCheckString = pairs.join("\n");
+
+  const encoder = new TextEncoder();
+
+  // secret_key = HMAC_SHA256(key="WebAppData", data=botToken)
+  const secretKeyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode("WebAppData"),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const secretKeyBuffer = await crypto.subtle.sign("HMAC", secretKeyMaterial, encoder.encode(botToken));
+
+  // computed_hash = HMAC_SHA256(key=secret_key, data=dataCheckString)
+  const hmacKey = await crypto.subtle.importKey(
+    "raw",
+    secretKeyBuffer,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sigBuffer = await crypto.subtle.sign("HMAC", hmacKey, encoder.encode(dataCheckString));
+  const computedHash = bufferToHex(sigBuffer);
+
+  if (computedHash !== hash) return null;
+
+  const authDate = parseInt(params.get("auth_date"), 10);
+  const now = Math.floor(Date.now() / 1000);
+  if (!authDate || now - authDate > 86400) return null; // reject sessions older than 24h
+
+  let user = null;
+  try {
+    user = JSON.parse(params.get("user") || "null");
+  } catch {
+    user = null;
+  }
+  if (!user || !user.id) return null;
+
+  return { user, authDate };
+}
+
+export async function requireAuth(request, env) {
+  const initData = request.headers.get("X-Telegram-Init-Data") || "";
+  return verifyInitData(initData, env.TELEGRAM_BOT_TOKEN);
+}
+
+export async function supabaseRequest(env, path, options = {}) {
+  const url = `${env.SUPABASE_URL}/rest/v1/${path}`;
+  const headers = {
+    apikey: env.SUPABASE_SECRET_KEY,
+    Authorization: `Bearer ${env.SUPABASE_SECRET_KEY}`,
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  return fetch(url, { ...options, headers });
+}
+
+export function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Expense Logger</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #111111);
+    --hint: var(--tg-theme-hint-color, #888888);
+    --button: var(--tg-theme-button-color, #2ea6ff);
+    --button-text: var(--tg-theme-button-text-color, #ffffff);
+    --secondary-bg: var(--tg-theme-secondary-bg-color, #f2f2f2);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px 16px 32px;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 4px 0 20px; }
+  label { display: block; font-size: 13px; color: var(--hint); margin: 14px 0 6px; }
+  input, select {
+    width: 100%; padding: 10px 12px; font-size: 16px;
+    border: 1px solid var(--secondary-bg); border-radius: 10px;
+    background: var(--secondary-bg); color: var(--text);
+  }
+  button {
+    width: 100%; margin-top: 24px; padding: 14px;
+    background: var(--button); color: var(--button-text);
+    border: none; border-radius: 12px; font-size: 16px; font-weight: 600;
+  }
+  button:disabled { opacity: 0.5; }
+  #status { margin-top: 14px; font-size: 14px; text-align: center; min-height: 20px; }
+  #status.error { color: #d32f2f; }
+  #status.success { color: #2e7d32; }
+</style>
+</head>
+<body>
+  <h1>New Expense</h1>
+
+  <label for="date">Date</label>
+  <input type="date" id="date" />
+
+  <label for="category">Category</label>
+  <select id="category"></select>
+
+  <label for="subcategory">Subcategory</label>
+  <select id="subcategory"></select>
+
+  <label for="amount">Amount (IDR)</label>
+  <input type="number" id="amount" min="0" step="1" placeholder="0" />
+
+  <label for="account">Payment Account</label>
+  <select id="account"></select>
+
+  <label for="description">Description</label>
+  <input type="text" id="description" placeholder="Optional" />
+
+  <button id="save">Save Expense</button>
+  <div id="status"></div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready();
+tg?.expand();
+
+const initData = tg?.initData || "";
+let categories = [], subcategories = [], accounts = [];
+
+const el = (id) => document.getElementById(id);
+const statusEl = el("status");
+
+function setStatus(msg, kind) {
+  statusEl.textContent = msg;
+  statusEl.className = kind || "";
+}
+
+function todayISO() {
+  const d = new Date();
+  const tz = d.getTimezoneOffset() * 60000;
+  return new Date(d - tz).toISOString().slice(0, 10);
+}
+
+function populateSelect(select, items, placeholder) {
+  select.innerHTML = "";
+  if (placeholder) {
+    const opt = document.createElement("option");
+    opt.value = ""; opt.textContent = placeholder; opt.disabled = true; opt.selected = true;
+    select.appendChild(opt);
+  }
+  for (const item of items) {
+    const opt = document.createElement("option");
+    opt.value = item.id; opt.textContent = item.name;
+    select.appendChild(opt);
+  }
+}
+
+function refreshSubcategoryOptions() {
+  const catId = Number(el("category").value);
+  const filtered = subcategories.filter((s) => s.category_id === catId);
+  populateSelect(el("subcategory"), filtered, filtered.length ? null : "No subcategories");
+}
+
+async function loadOptions() {
+  if (!initData) {
+    setStatus("Open this from the Telegram bot menu, not a browser.", "error");
+    el("save").disabled = true;
+    return;
+  }
+  try {
+    const res = await fetch("/api/options", {
+      headers: { "X-Telegram-Init-Data": initData },
+    });
+    if (!res.ok) throw new Error("options request failed: " + res.status);
+    const data = await res.json();
+    categories = data.categories; subcategories = data.subcategories; accounts = data.accounts;
+
+    populateSelect(el("category"), categories);
+    refreshSubcategoryOptions();
+    populateSelect(el("account"), accounts);
+    el("date").value = todayISO();
+  } catch (err) {
+    setStatus("Could not load categories. Pull down to retry.", "error");
+  }
+}
+
+el("category").addEventListener("change", refreshSubcategoryOptions);
+
+el("save").addEventListener("click", async () => {
+  const payload = {
+    expense_date: el("date").value,
+    category_id: el("category").value,
+    subcategory_id: el("subcategory").value,
+    account_id: el("account").value,
+    amount: el("amount").value,
+    description: el("description").value,
+  };
+
+  if (!payload.expense_date || !payload.category_id || !payload.subcategory_id ||
+      !payload.account_id || !payload.amount || Number(payload.amount) <= 0) {
+    setStatus("Fill in date, category, subcategory, amount, and account.", "error");
+    return;
+  }
+
+  el("save").disabled = true;
+  setStatus("Saving…");
+
+  try {
+    const res = await fetch("/api/expenses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Init-Data": initData,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "save failed");
+
+    const catName = categories.find((c) => c.id === Number(payload.category_id))?.name || "";
+    const subName = subcategories.find((s) => s.id === Number(payload.subcategory_id))?.name || "";
+    setStatus(`✓ Saved: Rp ${Number(payload.amount).toLocaleString("id-ID")} · ${catName} / ${subName}`, "success");
+    tg?.HapticFeedback?.notificationOccurred("success");
+
+    el("amount").value = "";
+    el("description").value = "";
+  } catch (err) {
+    setStatus("Save failed: " + err.message, "error");
+    tg?.HapticFeedback?.notificationOccurred("error");
+  } finally {
+    el("save").disabled = false;
+  }
+});
+
+loadOptions();
+</script>
+</body>
+</html>
