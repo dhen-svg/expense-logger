@@ -22,6 +22,8 @@
   }
   h1 { font-size: 20px; margin: 4px 0 20px; }
   label { display: block; font-size: 13px; color: var(--hint); margin: 14px 0 6px; }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
   input, select {
     width: 100%; padding: 10px 12px; font-size: 16px;
     border: 1px solid var(--secondary-bg); border-radius: 10px;
@@ -39,10 +41,18 @@
 </style>
 </head>
 <body>
-  <h1>New Expense</h1>
+  <h1>New Transaction</h1>
 
-  <label for="date">Date</label>
-  <input type="date" id="date" />
+  <div class="row">
+    <div>
+      <label for="date">Date</label>
+      <input type="date" id="date" />
+    </div>
+    <div>
+      <label for="time">Time</label>
+      <input type="time" id="time" />
+    </div>
+  </div>
 
   <label for="category">Category</label>
   <select id="category"></select>
@@ -56,10 +66,17 @@
   <label for="account">Payment Account</label>
   <select id="account"></select>
 
+  <label for="used_by">Used By</label>
+  <select id="used_by"></select>
+
+  <label for="tags">Tags</label>
+  <input type="text" id="tags" placeholder="comma separated, e.g. weekend, urgent" list="tag-options" />
+  <datalist id="tag-options"></datalist>
+
   <label for="description">Description</label>
   <input type="text" id="description" placeholder="Optional" />
 
-  <button id="save">Save Expense</button>
+  <button id="save">Save</button>
   <div id="status"></div>
 
 <script>
@@ -68,7 +85,7 @@ tg?.ready();
 tg?.expand();
 
 const initData = tg?.initData || "";
-let categories = [], subcategories = [], accounts = [];
+let categories = [], subcategories = [], accounts = [], spenders = [], knownTags = [];
 
 const el = (id) => document.getElementById(id);
 const statusEl = el("status");
@@ -84,6 +101,11 @@ function todayISO() {
   return new Date(d - tz).toISOString().slice(0, 10);
 }
 
+function nowHHMM() {
+  const d = new Date();
+  return d.toTimeString().slice(0, 5);
+}
+
 function populateSelect(select, items, placeholder) {
   select.innerHTML = "";
   if (placeholder) {
@@ -95,6 +117,21 @@ function populateSelect(select, items, placeholder) {
     const opt = document.createElement("option");
     opt.value = item.id; opt.textContent = item.name;
     select.appendChild(opt);
+  }
+}
+
+function populateCategorySelect() {
+  const select = el("category");
+  select.innerHTML = "";
+  for (const type of ["income", "expense"]) {
+    const group = document.createElement("optgroup");
+    group.label = type === "income" ? "Income" : "Expense";
+    for (const c of categories.filter((c) => c.type === type)) {
+      const opt = document.createElement("option");
+      opt.value = c.id; opt.textContent = c.name;
+      group.appendChild(opt);
+    }
+    if (group.children.length) select.appendChild(group);
   }
 }
 
@@ -116,12 +153,24 @@ async function loadOptions() {
     });
     if (!res.ok) throw new Error("options request failed: " + res.status);
     const data = await res.json();
-    categories = data.categories; subcategories = data.subcategories; accounts = data.accounts;
+    categories = data.categories; subcategories = data.subcategories;
+    accounts = data.accounts; spenders = data.spenders; knownTags = data.tags || [];
 
-    populateSelect(el("category"), categories);
+    populateCategorySelect();
     refreshSubcategoryOptions();
     populateSelect(el("account"), accounts);
+    populateSelect(el("used_by"), spenders, "None");
+
+    const dl = el("tag-options");
+    dl.innerHTML = "";
+    for (const t of knownTags) {
+      const opt = document.createElement("option");
+      opt.value = t;
+      dl.appendChild(opt);
+    }
+
     el("date").value = todayISO();
+    el("time").value = nowHHMM();
   } catch (err) {
     setStatus("Could not load categories. Pull down to retry.", "error");
   }
@@ -130,13 +179,18 @@ async function loadOptions() {
 el("category").addEventListener("change", refreshSubcategoryOptions);
 
 el("save").addEventListener("click", async () => {
+  const tagList = el("tags").value.split(",").map((t) => t.trim()).filter(Boolean);
+
   const payload = {
     expense_date: el("date").value,
+    expense_time: el("time").value,
     category_id: el("category").value,
     subcategory_id: el("subcategory").value,
     account_id: el("account").value,
+    used_by_id: el("used_by").value || null,
     amount: el("amount").value,
     description: el("description").value,
+    tags: tagList,
   };
 
   if (!payload.expense_date || !payload.category_id || !payload.subcategory_id ||
@@ -167,6 +221,7 @@ el("save").addEventListener("click", async () => {
 
     el("amount").value = "";
     el("description").value = "";
+    el("tags").value = "";
   } catch (err) {
     setStatus("Save failed: " + err.message, "error");
     tg?.HapticFeedback?.notificationOccurred("error");

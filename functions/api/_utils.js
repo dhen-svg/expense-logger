@@ -83,3 +83,23 @@ export function json(data, status = 200) {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+// Posts a message into the configured group/chat. Silently does nothing if
+// NOTIFY_CHAT_ID isn't set, and never throws — a notification failure should
+// never fail the actual expense save.
+export async function notifyChat(env, text) {
+  if (!env.NOTIFY_CHAT_ID || !env.TELEGRAM_BOT_TOKEN) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: env.NOTIFY_CHAT_ID,
+        text,
+        parse_mode: "HTML",
+      }),
+    });
+  } catch {
+    // best-effort only
+  }
+}
