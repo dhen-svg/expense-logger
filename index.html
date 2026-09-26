@@ -66,8 +66,8 @@
   <label for="account">Payment Account</label>
   <select id="account"></select>
 
-  <label for="used_by">Used By</label>
-  <select id="used_by"></select>
+  <label>Used By</label>
+  <div id="used_by" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
 
   <label for="tags">Tags</label>
   <input type="text" id="tags" placeholder="comma separated, e.g. weekend, urgent" list="tag-options" />
@@ -135,6 +135,24 @@ function populateCategorySelect() {
   }
 }
 
+function populateUsedByCheckboxes(spenders) {
+  const container = el("used_by");
+  container.innerHTML = "";
+  for (const s of spenders) {
+    const wrap = document.createElement("label");
+    wrap.style.cssText = "display:flex; align-items:center; gap:4px; width:auto; margin:0; padding:6px 10px; background:var(--secondary-bg); border-radius:20px; font-size:14px; color:var(--text);";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = s.id; cb.style.width = "auto";
+    wrap.appendChild(cb);
+    wrap.appendChild(document.createTextNode(s.name));
+    container.appendChild(wrap);
+  }
+}
+
+function getUsedByIds() {
+  return [...el("used_by").querySelectorAll("input[type=checkbox]:checked")].map((cb) => Number(cb.value));
+}
+
 function refreshSubcategoryOptions() {
   const catId = Number(el("category").value);
   const filtered = subcategories.filter((s) => s.category_id === catId);
@@ -159,7 +177,7 @@ async function loadOptions() {
     populateCategorySelect();
     refreshSubcategoryOptions();
     populateSelect(el("account"), accounts);
-    populateSelect(el("used_by"), spenders, "None");
+    populateUsedByCheckboxes(spenders);
 
     const dl = el("tag-options");
     dl.innerHTML = "";
@@ -187,7 +205,7 @@ el("save").addEventListener("click", async () => {
     category_id: el("category").value,
     subcategory_id: el("subcategory").value,
     account_id: el("account").value,
-    used_by_id: el("used_by").value || null,
+    used_by_ids: getUsedByIds(),
     amount: el("amount").value,
     description: el("description").value,
     tags: tagList,

@@ -90,16 +90,44 @@ export function json(data, status = 200) {
 export async function notifyChat(env, text) {
   if (!env.NOTIFY_CHAT_ID || !env.TELEGRAM_BOT_TOKEN) return;
   try {
-    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: env.NOTIFY_CHAT_ID,
-        text,
-        parse_mode: "HTML",
-      }),
+    await telegramApi(env, "sendMessage", {
+      chat_id: env.NOTIFY_CHAT_ID,
+      text,
+      parse_mode: "HTML",
     });
   } catch {
     // best-effort only
   }
+}
+
+// Generic Telegram Bot API call. Never throws — callers that care about the
+// result can inspect the return value; notifications are always best-effort.
+export async function telegramApi(env, method, payload) {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export function fmtIDR(n) {
+  return "Rp " + Math.round(n).toLocaleString("id-ID");
+}
+
+export function fmtDateHuman(isoDate) {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+// Returns [monthStart, monthEnd] as YYYY-MM-DD for the given year/month (1-12).
+export function monthRange(year, month) {
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 0));
+  const iso = (d) => d.toISOString().slice(0, 10);
+  return [iso(start), iso(end)];
 }

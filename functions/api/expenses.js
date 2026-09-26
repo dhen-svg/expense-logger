@@ -1,4 +1,12 @@
-import { requireAuth, supabaseRequest, json, notifyChat } from "./_utils.js";
+import {
+  requireAuth,
+  supabaseRequest,
+  json,
+  notifyChat,
+  fmtIDR,
+  fmtDateHuman,
+  monthRange,
+} from "./_utils.js";
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -23,7 +31,7 @@ export async function onRequestPost(context) {
     category_id,
     subcategory_id,
     account_id,
-    used_by_id,
+    used_by_ids,
     amount,
     description,
     tags,
@@ -38,14 +46,13 @@ export async function onRequestPost(context) {
   const catId = Number(category_id);
   const subId = Number(subcategory_id);
   const accId = Number(account_id);
-  const usedById = used_by_id ? Number(used_by_id) : null;
   const amt = Number(amount);
+  const usedByIds = Array.isArray(used_by_ids)
+    ? [...new Set(used_by_ids.map(Number).filter(Number.isInteger))]
+    : [];
 
   if (!Number.isInteger(catId) || !Number.isInteger(subId) || !Number.isInteger(accId)) {
     return json({ error: "category_id, subcategory_id, account_id must be integers" }, 400);
-  }
-  if (used_by_id && !Number.isInteger(usedById)) {
-    return json({ error: "used_by_id must be an integer" }, 400);
   }
   if (!Number.isFinite(amt) || amt <= 0) {
     return json({ error: "amount must be a positive number" }, 400);
@@ -62,24 +69,29 @@ export async function onRequestPost(context) {
     supabaseRequest(env, `expense_categories?id=eq.${catId}&select=id,name,type`),
     supabaseRequest(env, `payment_accounts?id=eq.${accId}&select=id,name`),
   ];
-  if (usedById) lookups.push(supabaseRequest(env, `spenders?id=eq.${usedById}&select=id,name`));
+  if (usedByIds.length) {
+    const idList = usedByIds.join(",");
+    lookups.push(supabaseRequest(env, `spenders?id=in.(${idList})&select=id,name`));
+  }
 
   const [subRes, catRes, accRes, spenderRes] = await Promise.all(lookups);
-  if (!subRes.ok || !catRes.ok || !accRes.ok || (usedById && !spenderRes.ok)) {
+  if (!subRes.ok || !catRes.ok || !accRes.ok || (usedByIds.length && !spenderRes.ok)) {
     return json({ error: "validation lookup failed" }, 502);
   }
 
   const subRows = await subRes.json();
   const catRows = await catRes.json();
   const accRows = await accRes.json();
-  const spenderRows = usedById ? await spenderRes.json() : [];
+  const spenderRows = usedByIds.length ? await spenderRes.json() : [];
 
   if (subRows.length === 0 || subRows[0].category_id !== catId) {
     return json({ error: "subcategory does not belong to the given category" }, 400);
   }
   if (catRows.length === 0) return json({ error: "unknown category" }, 400);
   if (accRows.length === 0) return json({ error: "unknown payment account" }, 400);
-  if (usedById && spenderRows.length === 0) return json({ error: "unknown used_by" }, 400);
+  if (usedByIds.length && spenderRows.length !== usedByIds.length) {
+    return json({ error: "one or more used_by_ids is unknown" }, 400);
+  }
 
   // --- Upsert any brand-new tags so future dropdowns/autocomplete pick them up ---
   if (tagNames.length > 0) {
@@ -100,7 +112,7 @@ export async function onRequestPost(context) {
       category_id: catId,
       subcategory_id: subId,
       account_id: accId,
-      used_by_id: usedById,
+      used_by_ids: usedByIds,
       amount: amt,
       description: desc,
       tags: tagNames,
@@ -120,20 +132,71 @@ export async function onRequestPost(context) {
   const category = catRows[0];
   const subcategory = subRows[0];
   const account = accRows[0];
-  const spenderName = spenderRows[0]?.name;
   const submittedBy = auth.user.first_name || auth.user.username || "Someone";
-  const sign = category.type === "income" ? "+" : "-";
+  const usedByText = spenderRows.length ? spenderRows.map((s) => s.name).join(", ") : "—";
 
   const lines = [
-    `<b>${sign}Rp ${amt.toLocaleString("id-ID")}</b> logged by ${escapeHtml(submittedBy)}`,
-    `${escapeHtml(category.name)} / ${escapeHtml(subcategory.name || "")}`,
-    `${expense_date} ${time} · ${escapeHtml(account.name)}`,
+    `<b>TRANSACTION LOGGED</b> · #${row.id}`,
+    `at ${fmtDateHuman(expense_date)} ${time} by ${escapeHtml(submittedBy)}`,
+    `${fmtIDR(amt)} on ${escapeHtml(account.name)}`,
+    `${category.type === "income" ? "Income" : "Expense"} / ${escapeHtml(category.name)} / ${escapeHtml(subcategory.name)}`,
+    `Used by ${escapeHtml(usedByText)}`,
+    `Note: ${desc ? escapeHtml(desc) : "-"}`,
+    `Tags: ${tagNames.length ? tagNames.map((t) => "#" + t).join(" ") : "-"}`,
   ];
-  if (spenderName) lines.push(`Used by: ${escapeHtml(spenderName)}`);
-  if (desc) lines.push(`"${escapeHtml(desc)}"`);
-  if (tagNames.length) lines.push(`Tags: ${tagNames.map((t) => "#" + t).join(" ")}`);
-
   await notifyChat(env, lines.join("\n"));
 
+  // --- Budget-crossing alert (expense categories only) ---
+  if (category.type === "expense") {
+    await checkBudgetAlert(env, { catId, subId, category, subcategory, expense_date, amt });
+  }
+
   return json({ ok: true, expense: row });
+}
+
+async function checkBudgetAlert(env, { catId, subId, category, subcategory, expense_date, amt }) {
+  try {
+    const [year, month] = expense_date.split("-").map(Number);
+
+    // Prefer a subcategory-level budget; fall back to category-level.
+    const budgetRes = await supabaseRequest(
+      env,
+      `budgets?category_id=eq.${catId}&year=eq.${year}&month=eq.${month}` +
+        `&or=(subcategory_id.eq.${subId},subcategory_id.is.null)` +
+        `&select=id,subcategory_id,planned_amount&order=subcategory_id.desc.nullslast&limit=1`
+    );
+    if (!budgetRes.ok) return;
+    const budgetRows = await budgetRes.json();
+    if (budgetRows.length === 0) return;
+
+    const budget = budgetRows[0];
+    const scopedToSub = budget.subcategory_id !== null;
+    const [start, end] = monthRange(year, month);
+
+    const filterClause = scopedToSub
+      ? `category_id=eq.${catId}&subcategory_id=eq.${subId}`
+      : `category_id=eq.${catId}`;
+
+    const sumRes = await supabaseRequest(
+      env,
+      `expense_ledger?${filterClause}&expense_date=gte.${start}&expense_date=lte.${end}&select=amount`
+    );
+    if (!sumRes.ok) return;
+    const rows = await sumRes.json();
+    const total = rows.reduce((acc, r) => acc + Number(r.amount), 0);
+    const previousTotal = total - amt;
+    const planned = Number(budget.planned_amount);
+
+    // Only fire the moment this transaction is the one that pushes it over.
+    if (previousTotal < planned && total >= planned) {
+      const pct = Math.round((total / planned) * 100);
+      const label = scopedToSub ? subcategory.name : category.name;
+      await notifyChat(
+        env,
+        `⚠️ <b>Budget alert</b>\n${label} has hit ${fmtIDR(total)} / ${fmtIDR(planned)} (${pct}%) for this month.`
+      );
+    }
+  } catch {
+    // best-effort only — never fail the transaction save over this
+  }
 }
