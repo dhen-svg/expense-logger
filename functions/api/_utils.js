@@ -119,6 +119,12 @@ export function fmtIDR(n) {
   return "Rp " + Math.round(n).toLocaleString("id-ID");
 }
 
+// IDR keeps the existing "Rp 1.234.567" style; other currencies show the code and 2 decimals.
+export function fmtMoney(n, currency) {
+  if (!currency || currency === "IDR") return fmtIDR(n);
+  return `${currency} ` + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 export function fmtDateHuman(isoDate) {
   const d = new Date(`${isoDate}T00:00:00Z`);
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });

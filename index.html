@@ -15,33 +15,44 @@
     --secondary-bg: var(--tg-theme-secondary-bg-color, #f2f2f2);
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     margin: 0; padding: 16px 16px 32px;
     background: var(--bg); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
-  h1 { font-size: 20px; margin: 4px 0 20px; }
+  h1 { font-size: 20px; margin: 4px 0 12px; }
   label { display: block; font-size: 13px; color: var(--hint); margin: 14px 0 6px; }
   .row { display: flex; gap: 10px; }
-  .row > div { flex: 1; }
+  .row > div { flex: 1; min-width: 0; }
+  input[type="date"], input[type="time"] { min-width: 0; }
   input, select {
-    width: 100%; padding: 10px 12px; font-size: 16px;
+    width: 100%; min-height: 44px; padding: 10px 12px; font-size: 16px;
     border: 1px solid var(--secondary-bg); border-radius: 10px;
     background: var(--secondary-bg); color: var(--text);
   }
   button {
-    width: 100%; margin-top: 24px; padding: 14px;
+    width: 100%; margin-top: 24px; padding: 14px; min-height: 44px;
     background: var(--button); color: var(--button-text);
     border: none; border-radius: 12px; font-size: 16px; font-weight: 600;
   }
   button:disabled { opacity: 0.5; }
+  .seg { display: flex; background: var(--secondary-bg); border-radius: 12px; padding: 3px; margin: 0 0 6px; }
+  .seg button { margin: 0; flex: 1; width: auto; background: transparent; color: var(--text); border-radius: 10px; }
+  .seg button[aria-pressed="true"] { background: var(--button); color: var(--button-text); }
+  .hint { font-size: 13px; color: var(--hint); margin: 8px 0 0; }
   #status { margin-top: 14px; font-size: 14px; text-align: center; min-height: 20px; }
   #status.error { color: #d32f2f; }
   #status.success { color: #2e7d32; }
 </style>
 </head>
 <body>
-  <h1>New Transaction</h1>
+  <h1 id="title">New Transaction</h1>
+
+  <div class="seg" id="mode-switch" role="group" aria-label="Entry type" hidden>
+    <button type="button" id="mode-txn" aria-pressed="true">Transaction</button>
+    <button type="button" id="mode-transfer" aria-pressed="false">Transfer</button>
+  </div>
 
   <div class="row">
     <div>
@@ -54,30 +65,55 @@
     </div>
   </div>
 
-  <label for="category">Category</label>
-  <select id="category"></select>
+  <div id="form-txn">
+    <label for="category">Category</label>
+    <select id="category"></select>
 
-  <label for="subcategory">Subcategory</label>
-  <select id="subcategory"></select>
+    <label for="subcategory">Subcategory</label>
+    <select id="subcategory"></select>
 
-  <label for="amount">Amount (IDR)</label>
-  <input type="number" id="amount" min="0" step="1" placeholder="0" />
+    <label for="amount">Amount (IDR)</label>
+    <input type="number" id="amount" min="0" step="1" placeholder="0" />
 
-  <label for="account">Payment Account</label>
-  <select id="account"></select>
+    <label for="account">Payment Account</label>
+    <select id="account"></select>
 
-  <label>Used By</label>
-  <div id="used_by" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+    <label>Used By</label>
+    <div id="used_by" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
 
-  <label for="tags">Tags</label>
-  <input type="text" id="tags" placeholder="comma separated, e.g. weekend, urgent" list="tag-options" />
-  <datalist id="tag-options"></datalist>
+    <label for="tags">Tags</label>
+    <input type="text" id="tags" placeholder="comma separated, e.g. weekend, urgent" list="tag-options" />
+    <datalist id="tag-options"></datalist>
 
-  <label for="description">Description</label>
-  <input type="text" id="description" placeholder="Optional" />
+    <label for="description">Description</label>
+    <input type="text" id="description" placeholder="Optional" />
+  </div>
+
+  <div id="form-transfer" hidden>
+    <label for="from_account">From account</label>
+    <select id="from_account"></select>
+
+    <label for="to_account">To account</label>
+    <select id="to_account"></select>
+
+    <label for="amount_out" id="label_out">Amount sent</label>
+    <input type="number" id="amount_out" min="0" step="any" placeholder="0" />
+
+    <div id="in_wrap" hidden>
+      <label for="amount_in" id="label_in">Amount received</label>
+      <input type="number" id="amount_in" min="0" step="any" placeholder="0" />
+    </div>
+
+    <label for="fee" id="label_fee">Fee (optional)</label>
+    <input type="number" id="fee" min="0" step="any" placeholder="0" />
+    <p class="hint" id="fee_hint"></p>
+
+    <label for="t_description">Description</label>
+    <input type="text" id="t_description" placeholder="Optional" />
+  </div>
 
   <button id="save">Save</button>
-  <div id="status"></div>
+  <div id="status" role="status"></div>
 
 <script>
 const tg = window.Telegram?.WebApp;
@@ -85,7 +121,10 @@ tg?.ready();
 tg?.expand();
 
 const initData = tg?.initData || "";
+const startParam = tg?.initDataUnsafe?.start_param || "";
 let categories = [], subcategories = [], accounts = [], spenders = [], knownTags = [];
+let transfersEnabled = false;
+let mode = "txn";
 
 const el = (id) => document.getElementById(id);
 const statusEl = el("status");
@@ -104,6 +143,11 @@ function todayISO() {
 function nowHHMM() {
   const d = new Date();
   return d.toTimeString().slice(0, 5);
+}
+
+function fmtMoney(n, cur) {
+  if (!cur || cur === "IDR") return "Rp " + Number(n).toLocaleString("id-ID");
+  return cur + " " + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function populateSelect(select, items, placeholder) {
@@ -140,9 +184,9 @@ function populateUsedByCheckboxes(spenders) {
   container.innerHTML = "";
   for (const s of spenders) {
     const wrap = document.createElement("label");
-    wrap.style.cssText = "display:flex; align-items:center; gap:4px; width:auto; margin:0; padding:6px 10px; background:var(--secondary-bg); border-radius:20px; font-size:14px; color:var(--text);";
+    wrap.style.cssText = "display:flex; align-items:center; gap:4px; width:auto; margin:0; padding:6px 10px; min-height:44px; background:var(--secondary-bg); border-radius:22px; font-size:14px; color:var(--text);";
     const cb = document.createElement("input");
-    cb.type = "checkbox"; cb.value = s.id; cb.style.width = "auto";
+    cb.type = "checkbox"; cb.value = s.id; cb.style.cssText = "width:auto; min-height:0;";
     wrap.appendChild(cb);
     wrap.appendChild(document.createTextNode(s.name));
     container.appendChild(wrap);
@@ -159,6 +203,42 @@ function refreshSubcategoryOptions() {
   populateSelect(el("subcategory"), filtered, filtered.length ? null : "No subcategories");
 }
 
+// ---- Transfer form helpers ----
+const accById = (id) => accounts.find((a) => a.id === Number(id));
+const curOf = (a) => (a && a.currency) || "IDR";
+
+function populateTransferSelects() {
+  const items = accounts.map((a) => ({ id: a.id, name: curOf(a) === "IDR" ? a.name : `${a.name} (${curOf(a)})` }));
+  populateSelect(el("from_account"), items, "Choose account");
+  populateSelect(el("to_account"), items, "Choose account");
+}
+
+function refreshTransferLabels() {
+  const from = accById(el("from_account").value);
+  const to = accById(el("to_account").value);
+  const fromCur = from ? curOf(from) : "IDR";
+  const toCur = to ? curOf(to) : fromCur;
+  el("label_out").textContent = `Amount sent (${fromCur})`;
+  el("label_fee").textContent = `Fee, optional (${fromCur})`;
+  const cross = from && to && fromCur !== toCur;
+  el("in_wrap").hidden = !cross;
+  el("label_in").textContent = `Amount received (${toCur})`;
+  el("fee_hint").textContent = fromCur === "IDR"
+    ? "A fee is also saved as a Taxes & Fees expense, so budgets and reports include it."
+    : "A fee in this currency stays on the transfer only, because the expense ledger is IDR.";
+}
+
+function setMode(next) {
+  mode = next;
+  el("form-txn").hidden = next !== "txn";
+  el("form-transfer").hidden = next !== "transfer";
+  el("mode-txn").setAttribute("aria-pressed", String(next === "txn"));
+  el("mode-transfer").setAttribute("aria-pressed", String(next === "transfer"));
+  el("title").textContent = next === "txn" ? "New Transaction" : "New Transfer";
+  el("save").textContent = next === "txn" ? "Save" : "Save transfer";
+  setStatus("");
+}
+
 async function loadOptions() {
   if (!initData) {
     setStatus("Open this from the Telegram bot menu, not a browser.", "error");
@@ -173,10 +253,14 @@ async function loadOptions() {
     const data = await res.json();
     categories = data.categories; subcategories = data.subcategories;
     accounts = data.accounts; spenders = data.spenders; knownTags = data.tags || [];
+    transfersEnabled = !!data.transfers_enabled;
 
     populateCategorySelect();
     refreshSubcategoryOptions();
-    populateSelect(el("account"), accounts);
+    // The expense form lists only accounts used for daily spending.
+    populateSelect(el("account"), accounts.filter((a) => a.show_in_expense_form !== false));
+    populateTransferSelects();
+    refreshTransferLabels();
     populateUsedByCheckboxes(spenders);
 
     const dl = el("tag-options");
@@ -189,14 +273,75 @@ async function loadOptions() {
 
     el("date").value = todayISO();
     el("time").value = nowHHMM();
+
+    el("mode-switch").hidden = !transfersEnabled;
+    setMode(transfersEnabled && startParam === "transfer" ? "transfer" : "txn");
   } catch (err) {
     setStatus("Could not load categories. Pull down to retry.", "error");
   }
 }
 
 el("category").addEventListener("change", refreshSubcategoryOptions);
+el("from_account").addEventListener("change", refreshTransferLabels);
+el("to_account").addEventListener("change", refreshTransferLabels);
+el("mode-txn").addEventListener("click", () => setMode("txn"));
+el("mode-transfer").addEventListener("click", () => setMode("transfer"));
+
+async function post(url, payload) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": initData },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "save failed");
+  return data;
+}
+
+async function saveTransfer() {
+  const from = accById(el("from_account").value);
+  const to = accById(el("to_account").value);
+  const cross = from && to && curOf(from) !== curOf(to);
+  const payload = {
+    transfer_date: el("date").value,
+    transfer_time: el("time").value,
+    from_account_id: el("from_account").value,
+    to_account_id: el("to_account").value,
+    amount_out: el("amount_out").value,
+    fee_amount: el("fee").value || 0,
+    description: el("t_description").value,
+  };
+  if (cross) payload.amount_in = el("amount_in").value;
+
+  if (!payload.transfer_date || !from || !to || !(Number(payload.amount_out) > 0)) {
+    setStatus("Fill in date, both accounts and the amount.", "error");
+    return;
+  }
+  if (from.id === to.id) { setStatus("Choose two different accounts.", "error"); return; }
+  if (cross && !(Number(payload.amount_in) > 0)) {
+    setStatus(`Enter the amount received in ${curOf(to)}.`, "error");
+    return;
+  }
+
+  el("save").disabled = true;
+  setStatus("Saving…");
+  try {
+    const data = await post("/api/transfers", payload);
+    const no = data.transfer?.txn_no || "";
+    setStatus(`✓ Transfer ${no}: ${fmtMoney(payload.amount_out, curOf(from))} · ${from.name} → ${to.name}`, "success");
+    tg?.HapticFeedback?.notificationOccurred("success");
+    el("amount_out").value = ""; el("amount_in").value = ""; el("fee").value = ""; el("t_description").value = "";
+  } catch (err) {
+    setStatus("Save failed: " + err.message, "error");
+    tg?.HapticFeedback?.notificationOccurred("error");
+  } finally {
+    el("save").disabled = false;
+  }
+}
 
 el("save").addEventListener("click", async () => {
+  if (mode === "transfer") return saveTransfer();
+
   const tagList = el("tags").value.split(",").map((t) => t.trim()).filter(Boolean);
 
   const payload = {
@@ -221,16 +366,7 @@ el("save").addEventListener("click", async () => {
   setStatus("Saving…");
 
   try {
-    const res = await fetch("/api/expenses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Telegram-Init-Data": initData,
-      },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "save failed");
+    await post("/api/expenses", payload);
 
     const catName = categories.find((c) => c.id === Number(payload.category_id))?.name || "";
     const subName = subcategories.find((s) => s.id === Number(payload.subcategory_id))?.name || "";
