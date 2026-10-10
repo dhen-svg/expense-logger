@@ -41,6 +41,42 @@
   .seg button { margin: 0; flex: 1; width: auto; background: transparent; color: var(--text); border-radius: 10px; }
   .seg button[aria-pressed="true"] { background: var(--button); color: var(--button-text); }
   .hint { font-size: 13px; color: var(--hint); margin: 8px 0 0; }
+  h2 { font-size: 15px; margin: 22px 0 8px; }
+  .monthnav { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; }
+  .monthnav button { margin: 0; width: 48px; flex: none; font-size: 22px; padding: 0; }
+  .monthlabel { flex: 1; text-align: center; font-size: 16px; font-weight: 600; }
+  .dmsg { font-size: 14px; color: var(--hint); text-align: center; min-height: 20px; margin: 10px 0; }
+  .dmsg.error { color: #d32f2f; }
+  .dmsg button { margin-top: 12px; width: auto; padding: 10px 18px; }
+  .cards { display: grid; gap: 8px; }
+  .card { background: var(--secondary-bg); border-radius: 12px; padding: 12px 14px; }
+  .card .k { font-size: 13px; color: var(--hint); }
+  .card .v { font-size: 20px; font-weight: 700; margin: 2px 0; font-variant-numeric: tabular-nums; }
+  .card .s { font-size: 13px; color: var(--hint); }
+  .track { height: 8px; border-radius: 4px; background: var(--bg); position: relative; margin: 6px 0 4px; overflow: hidden; }
+  .track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+  .track .plan { background: var(--hint); opacity: 0.35; }
+  .track .act { background: var(--button); }
+  .track .act.over { background: #d97706; }
+  details.cat { border-bottom: 1px solid var(--secondary-bg); }
+  details.cat > summary { list-style: none; cursor: pointer; padding: 10px 0; min-height: 44px; }
+  details.cat > summary::-webkit-details-marker { display: none; }
+  .crow { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .crow b { font-size: 15px; }
+  .crow span { font-size: 13px; color: var(--hint); font-variant-numeric: tabular-nums; text-align: right; }
+  .sub { padding: 6px 0 10px 14px; }
+  .sub .crow b { font-size: 14px; font-weight: 500; }
+  .dev { font-size: 13px; font-variant-numeric: tabular-nums; }
+  .dev.over { color: #d97706; }
+  .dev.under { color: var(--hint); }
+  .trow { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--secondary-bg); min-height: 44px; align-items: center; }
+  .trow .dev { white-space: nowrap; }
+  .trow .n { font-size: 14px; }
+  .trow .n small { display: block; color: var(--hint); font-size: 12px; }
+  .acc { padding: 8px 0; border-bottom: 1px solid var(--secondary-bg); font-size: 14px; }
+  .acc small { display: block; color: var(--hint); font-size: 13px; font-variant-numeric: tabular-nums; }
+  svg.chart { width: 100%; height: auto; display: block; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--hint); margin-top: 4px; }
   #status { margin-top: 14px; font-size: 14px; text-align: center; min-height: 20px; }
   #status.error { color: #d32f2f; }
   #status.success { color: #2e7d32; }
@@ -49,12 +85,13 @@
 <body>
   <h1 id="title">New Transaction</h1>
 
-  <div class="seg" id="mode-switch" role="group" aria-label="Entry type" hidden>
-    <button type="button" id="mode-txn" aria-pressed="true">Transaction</button>
-    <button type="button" id="mode-transfer" aria-pressed="false">Transfer</button>
+  <div class="seg" id="mode-switch" role="group" aria-label="View">
+    <button type="button" id="mode-txn" aria-pressed="true">Log</button>
+    <button type="button" id="mode-transfer" aria-pressed="false" hidden>Transfer</button>
+    <button type="button" id="mode-dash" aria-pressed="false">Dashboard</button>
   </div>
 
-  <div class="row">
+  <div class="row" id="row-when">
     <div>
       <label for="date">Date</label>
       <input type="date" id="date" />
@@ -110,6 +147,28 @@
 
     <label for="t_description">Description</label>
     <input type="text" id="t_description" placeholder="Optional" />
+  </div>
+
+  <div id="view-dash" hidden>
+    <div class="monthnav">
+      <button type="button" id="dash-prev" aria-label="Previous month">&lsaquo;</button>
+      <div id="dash-month" class="monthlabel" aria-live="polite"></div>
+      <button type="button" id="dash-next" aria-label="Next month">&rsaquo;</button>
+    </div>
+    <div id="dash-msg" class="dmsg" role="status"></div>
+    <div id="dash-body" hidden>
+      <div class="cards" id="dash-cards"></div>
+      <h2>Plan against actual, by category</h2>
+      <p class="hint" id="dash-cat-hint">Tap a category to see its subcategories.</p>
+      <div id="dash-cats"></div>
+      <h2>Biggest deviations</h2>
+      <div id="dash-top"></div>
+      <h2>Year to date</h2>
+      <div id="dash-ytd"></div>
+      <h2>Money in and out, by account</h2>
+      <div id="dash-acc"></div>
+      <p class="hint">Deviations from the plan are normal. They show what to learn, not what to fix. Income has no plan in the database yet.</p>
+    </div>
   </div>
 
   <button id="save">Save</button>
@@ -230,13 +289,20 @@ function refreshTransferLabels() {
 
 function setMode(next) {
   mode = next;
+  const dash = next === "dash";
   el("form-txn").hidden = next !== "txn";
   el("form-transfer").hidden = next !== "transfer";
+  el("view-dash").hidden = !dash;
+  el("row-when").hidden = dash;
+  el("save").hidden = dash;
+  el("status").hidden = dash;
   el("mode-txn").setAttribute("aria-pressed", String(next === "txn"));
   el("mode-transfer").setAttribute("aria-pressed", String(next === "transfer"));
-  el("title").textContent = next === "txn" ? "New Transaction" : "New Transfer";
+  el("mode-dash").setAttribute("aria-pressed", String(dash));
+  el("title").textContent = next === "txn" ? "New Transaction" : next === "transfer" ? "New Transfer" : "Dashboard";
   el("save").textContent = next === "txn" ? "Save" : "Save transfer";
   setStatus("");
+  if (dash) loadDashboard();
 }
 
 async function loadOptions() {
@@ -274,8 +340,8 @@ async function loadOptions() {
     el("date").value = todayISO();
     el("time").value = nowHHMM();
 
-    el("mode-switch").hidden = !transfersEnabled;
-    setMode(transfersEnabled && startParam === "transfer" ? "transfer" : "txn");
+    el("mode-transfer").hidden = !transfersEnabled;
+    setMode(startParam === "dashboard" ? "dash" : transfersEnabled && startParam === "transfer" ? "transfer" : "txn");
   } catch (err) {
     setStatus("Could not load categories. Pull down to retry.", "error");
   }
@@ -286,6 +352,7 @@ el("from_account").addEventListener("change", refreshTransferLabels);
 el("to_account").addEventListener("change", refreshTransferLabels);
 el("mode-txn").addEventListener("click", () => setMode("txn"));
 el("mode-transfer").addEventListener("click", () => setMode("transfer"));
+el("mode-dash").addEventListener("click", () => setMode("dash"));
 
 async function post(url, payload) {
   const res = await fetch(url, {
@@ -383,6 +450,127 @@ el("save").addEventListener("click", async () => {
     el("save").disabled = false;
   }
 });
+
+
+// ---------------- Dashboard ----------------
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+let dashYear = new Date().getFullYear(), dashMonth = new Date().getMonth() + 1, dashSeq = 0;
+const rp = (n) => (n < 0 ? "-" : "") + "Rp " + Math.round(Math.abs(n)).toLocaleString("id-ID");
+const fmtNat = (n, cur) => (cur === "IDR" ? rp(n) : cur + " " + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+function devText(plan, actual) {
+  const v = actual - plan;
+  if (plan === 0 && actual === 0) return { t: "No plan, no spend", c: "under" };
+  if (plan === 0) return { t: "Unplanned: " + rp(actual), c: "over" };
+  const pct = Math.round((v / plan) * 100);
+  if (v > 0) return { t: "Over by " + rp(v) + " (+" + pct + "%)", c: "over" };
+  if (v < 0) return { t: "Under by " + rp(-v) + " (" + pct + "%)", c: "under" };
+  return { t: "On plan", c: "under" };
+}
+function bar(plan, actual) {
+  const max = Math.max(plan, actual, 1);
+  const t = mk("div", "track"); t.setAttribute("aria-hidden", "true");
+  const p = mk("i", "plan"); p.style.width = (plan / max * 100) + "%";
+  const a = mk("i", "act" + (actual > plan ? " over" : "")); a.style.width = (actual / max * 100) + "%";
+  t.append(p, a); return t;
+}
+function setDashMsg(text, kind, retry) {
+  const m = el("dash-msg"); m.textContent = text; m.className = "dmsg" + (kind ? " " + kind : "");
+  if (retry) { const b = mk("button", "", "Try again"); b.type = "button"; b.addEventListener("click", loadDashboard); m.appendChild(document.createElement("br")); m.appendChild(b); }
+}
+function ytdChart(rows) {
+  const W = 340, H = 170, L = 8, R = 8, T = 10, B = 24, pw = W - L - R, ph = H - T - B;
+  const max = Math.max(...rows.map((r) => Math.max(r.plan, r.actual || 0)), 1);
+  const x = (i) => L + (i / 11) * pw, y = (v) => T + ph - (v / max) * ph;
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("class", "chart"); svg.setAttribute("role", "img");
+  const last = rows.filter((r) => r.actual !== null).at(-1);
+  svg.setAttribute("aria-label", `Cumulative spending this year: plan ${rp(rows[11].plan)} for the full year, actual ${rp(last ? last.actual : 0)} so far`);
+  const mkSvg = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+  svg.appendChild(mkSvg("line", { x1: L, x2: W - R, y1: T + ph, y2: T + ph, stroke: "var(--hint)", "stroke-opacity": "0.4" }));
+  const path = (pts, attrs) => mkSvg("path", Object.assign({ d: pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(""), fill: "none", "stroke-width": "2", "stroke-linejoin": "round" }, attrs));
+  svg.appendChild(path(rows.map((r, i) => [x(i), y(r.plan)]), { stroke: "var(--hint)", "stroke-dasharray": "5 4" }));
+  const act = rows.map((r, i) => (r.actual === null ? null : [x(i), y(r.actual)])).filter(Boolean);
+  if (act.length) {
+    svg.appendChild(path(act, { stroke: "var(--button)" }));
+    svg.appendChild(mkSvg("circle", { cx: act.at(-1)[0], cy: act.at(-1)[1], r: "4", fill: "var(--button)" }));
+  }
+  [0, 2, 5, 8, 11].forEach((i) => { const t = mkSvg("text", { x: x(i), y: H - 6, "text-anchor": i === 0 ? "start" : i === 11 ? "end" : "middle", "font-size": "11", fill: "var(--hint)" }); t.textContent = MONTHS[i]; svg.appendChild(t); });
+  return svg;
+}
+function renderDashboard(d) {
+  el("dash-month").textContent = MONTHS[d.month - 1] + " " + d.year;
+  const t = d.totals, cards = el("dash-cards"); cards.replaceChildren();
+  const pct = t.expense_plan ? Math.round((t.expense_actual / t.expense_plan) * 100) : null;
+  const c1 = mk("div", "card"); c1.append(mk("div", "k", "Spent against plan"), mk("div", "v", rp(t.expense_actual)),
+    mk("div", "s", "Plan " + rp(t.expense_plan) + (pct === null ? "" : " · " + pct + "% used")), bar(t.expense_plan, t.expense_actual),
+    mk("div", "dev " + devText(t.expense_plan, t.expense_actual).c, devText(t.expense_plan, t.expense_actual).t));
+  const c2 = mk("div", "card"); c2.append(mk("div", "k", "Income logged"), mk("div", "v", rp(t.income_actual)), mk("div", "s", "No plan for income yet"));
+  const c3 = mk("div", "card"); c3.append(mk("div", "k", "Income minus spending"), mk("div", "v", rp(t.net_actual)), mk("div", "s", "Before transfers to investments"));
+  cards.append(c1, c2, c3);
+
+  const cats = el("dash-cats"); cats.replaceChildren();
+  if (!d.categories.length) cats.appendChild(mk("p", "hint", "No plan or spending for this month."));
+  for (const c of d.categories) {
+    const det = mk("details", "cat"), sum = mk("summary");
+    const row = mk("div", "crow"); row.append(mk("b", "", c.name), mk("span", "", rp(c.actual) + " of " + rp(c.plan)));
+    const dv = devText(c.plan, c.actual);
+    sum.append(row, bar(c.plan, c.actual), mk("div", "dev " + dv.c, dv.t)); det.appendChild(sum);
+    for (const s of c.subs) {
+      const sd = devText(s.plan, s.actual), box = mk("div", "sub"), r = mk("div", "crow");
+      r.append(mk("b", "", s.name), mk("span", "", rp(s.actual) + " of " + rp(s.plan)));
+      box.append(r, bar(s.plan, s.actual), mk("div", "dev " + sd.c, sd.t)); det.appendChild(box);
+    }
+    cats.appendChild(det);
+  }
+
+  const top = el("dash-top"); top.replaceChildren();
+  if (!d.top_variances.length) top.appendChild(mk("p", "hint", "Nothing to compare yet."));
+  for (const v of d.top_variances) {
+    const row = mk("div", "trow"), n = mk("div", "n", v.name); n.appendChild(mk("small", "", v.category + " · plan " + rp(v.plan) + ", actual " + rp(v.actual)));
+    const dv = devText(v.plan, v.actual); row.append(n, mk("div", "dev " + dv.c, (v.variance > 0 ? "+" : v.variance < 0 ? "-" : "") + rp(Math.abs(v.variance)).replace("Rp ", "Rp ")));
+    top.appendChild(row);
+  }
+
+  const ytd = el("dash-ytd"); ytd.replaceChildren(); ytd.appendChild(ytdChart(d.ytd));
+  const lg = mk("div", "legend"); lg.append(mk("span", "", "Dashed: plan, whole year"), mk("span", "", "Solid: actual so far")); ytd.appendChild(lg);
+  const lastRow = d.ytd.filter((r) => r.actual !== null).at(-1);
+  const planToDate = d.ytd[d.month - 1].plan;
+  ytd.appendChild(mk("p", "hint", "To date: actual " + rp(lastRow ? lastRow.actual : 0) + " against a plan of " + rp(planToDate) + (d.meta.first_entry_date ? ". Logging started " + d.meta.first_entry_date + ", so earlier months show plan only." : ".")));
+
+  const acc = el("dash-acc"); acc.replaceChildren();
+  if (!d.accounts.length) acc.appendChild(mk("p", "hint", "No money moved in this month."));
+  for (const a of d.accounts) {
+    const row = mk("div", "acc", a.name);
+    row.appendChild(mk("small", "", "In " + fmtNat(a.inflow, a.currency) + " · Out " + fmtNat(a.outflow, a.currency) + " · Net " + (a.net < 0 ? "-" : "") + fmtNat(a.net, a.currency)));
+    acc.appendChild(row);
+  }
+  el("dash-body").hidden = false;
+  setDashMsg(d.meta.entries_in_month === 0 ? "Nothing logged for " + MONTHS[d.month - 1] + " " + d.year + " yet. The plan is shown for reference." : "");
+}
+async function loadDashboard() {
+  const seq = ++dashSeq;
+  el("dash-month").textContent = MONTHS[dashMonth - 1] + " " + dashYear;
+  el("dash-body").hidden = true; setDashMsg("Loading…");
+  try {
+    const res = await fetch(`/api/dashboard?year=${dashYear}&month=${dashMonth}`, { headers: { "X-Telegram-Init-Data": initData } });
+    const data = await res.json();
+    if (seq !== dashSeq) return;
+    if (!res.ok) throw new Error(data.error || "request failed");
+    renderDashboard(data);
+  } catch (err) {
+    if (seq !== dashSeq) return;
+    setDashMsg("Could not load the dashboard: " + err.message, "error", true);
+  }
+}
+function shiftMonth(delta) {
+  dashMonth += delta;
+  if (dashMonth < 1) { dashMonth = 12; dashYear--; }
+  if (dashMonth > 12) { dashMonth = 1; dashYear++; }
+  loadDashboard();
+}
+el("dash-prev").addEventListener("click", () => shiftMonth(-1));
+el("dash-next").addEventListener("click", () => shiftMonth(1));
 
 loadOptions();
 </script>

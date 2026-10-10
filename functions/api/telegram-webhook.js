@@ -297,6 +297,14 @@ export async function onRequestPost(context) {
       text: "Tap to log a transfer between accounts:",
       reply_markup: { inline_keyboard: [[{ text: "Log Transfer", url: `${link}${sep}startapp=transfer` }]] },
     });
+  } else if (text.startsWith("/dashboard")) {
+    const link = env.MINI_APP_LINK || "";
+    const sep = link.includes("?") ? "&" : "?";
+    await telegramApi(env, "sendMessage", {
+      chat_id: chatId,
+      text: "Plan against real, this month:",
+      reply_markup: { inline_keyboard: [[{ text: "Open Dashboard", url: `${link}${sep}startapp=dashboard` }]] },
+    });
   } else if (text.startsWith("/accounts")) {
     const { year, month } = thisMonth();
     const report = await accountMovementText(env, year, month);
