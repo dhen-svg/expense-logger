@@ -77,6 +77,22 @@
   .acc small { display: block; color: var(--hint); font-size: 13px; font-variant-numeric: tabular-nums; }
   svg.chart { width: 100%; height: auto; display: block; }
   .legend { display: flex; gap: 14px; font-size: 12px; color: var(--hint); margin-top: 4px; }
+  .statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-top: 8px; }
+  .stat span { display: block; font-size: 12px; color: var(--hint); }
+  .stat b { font-size: 16px; font-variant-numeric: tabular-nums; }
+  .periodbar { margin: 10px 0 0; }
+  svg.donut { width: 168px; height: 168px; display: block; margin: 6px auto 4px; }
+  .lrow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 6px 0; font-size: 14px; border-bottom: 1px solid var(--secondary-bg); }
+  .lrow i { width: 12px; height: 12px; border-radius: 3px; display: block; }
+  .lrow .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lrow .p { color: var(--hint); min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+  .lrow .a { font-variant-numeric: tabular-nums; min-width: 78px; text-align: right; }
+  .key { display: flex; gap: 14px; font-size: 12px; color: var(--hint); margin-top: 4px; align-items: center; }
+  .key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  details.plan > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-size: 15px; font-weight: 600; list-style: none; }
+  details.plan > summary::-webkit-details-marker { display: none; }
+  details.plan > summary::after { content: "+"; margin-left: auto; font-size: 20px; color: var(--hint); }
+  details.plan[open] > summary::after { content: "\2212"; }
   #status { margin-top: 14px; font-size: 14px; text-align: center; min-height: 20px; }
   #status.error { color: #d32f2f; }
   #status.success { color: #2e7d32; }
@@ -150,24 +166,46 @@
   </div>
 
   <div id="view-dash" hidden>
-    <div class="monthnav">
-      <button type="button" id="dash-prev" aria-label="Previous month">&lsaquo;</button>
-      <div id="dash-month" class="monthlabel" aria-live="polite"></div>
-      <button type="button" id="dash-next" aria-label="Next month">&rsaquo;</button>
-    </div>
     <div id="dash-msg" class="dmsg" role="status"></div>
     <div id="dash-body" hidden>
-      <div class="cards" id="dash-cards"></div>
-      <h2>Plan against actual, by category</h2>
-      <p class="hint" id="dash-cat-hint">Tap a category to see its subcategories.</p>
-      <div id="dash-cats"></div>
-      <h2>Biggest deviations</h2>
-      <div id="dash-top"></div>
-      <h2>Year to date</h2>
-      <div id="dash-ytd"></div>
+      <h2 style="margin-top:4px">Right now</h2>
+      <div class="cards" id="dash-now"></div>
+      <p class="hint" id="dash-now-note"></p>
+
+      <h2>Explore</h2>
+      <div class="monthnav">
+        <button type="button" id="dash-prev" aria-label="Previous month">&lsaquo;</button>
+        <div id="dash-month" class="monthlabel" aria-live="polite"></div>
+        <button type="button" id="dash-next" aria-label="Next month">&rsaquo;</button>
+      </div>
+      <div class="seg periodbar" id="dash-period" role="group" aria-label="Period">
+        <button type="button" id="per-month" aria-pressed="true">Month</button>
+        <button type="button" id="per-year" aria-pressed="false">Year to date</button>
+      </div>
+      <p class="hint" id="dash-period-note"></p>
+
+      <h2>Where the money goes</h2>
+      <div id="dash-donut-exp"></div>
+      <h2>Where the money comes from</h2>
+      <div id="dash-donut-inc"></div>
+      <h2>Month by month</h2>
+      <div id="dash-trend"></div>
+
       <h2>Money in and out, by account</h2>
       <div id="dash-acc"></div>
-      <p class="hint">Deviations from the plan are normal. They show what to learn, not what to fix. Income has no plan in the database yet.</p>
+
+      <details class="plan" id="dash-plan">
+        <summary>Against plan (built on assumptions)</summary>
+        <div class="cards" id="dash-cards"></div>
+        <h2>Plan against actual, by category</h2>
+        <p class="hint" id="dash-cat-hint">Tap a category to see its subcategories.</p>
+        <div id="dash-cats"></div>
+        <h2>Biggest deviations</h2>
+        <div id="dash-top"></div>
+        <h2>Year to date</h2>
+        <div id="dash-ytd"></div>
+        <p class="hint">Deviations from the plan are normal. They show what to learn, not what to fix. Income has no plan in this view yet.</p>
+      </details>
     </div>
   </div>
 
@@ -454,9 +492,16 @@ el("save").addEventListener("click", async () => {
 
 // ---------------- Dashboard ----------------
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-let dashYear = new Date().getFullYear(), dashMonth = new Date().getMonth() + 1, dashSeq = 0;
+let dashYear = new Date().getFullYear(), dashMonth = new Date().getMonth() + 1, dashSeq = 0, dashPeriod = "month";
 const rp = (n) => (n < 0 ? "-" : "") + "Rp " + Math.round(Math.abs(n)).toLocaleString("id-ID");
 const fmtNat = (n, cur) => (cur === "IDR" ? rp(n) : cur + " " + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const rpc = (n) => {
+  const a = Math.abs(n), sg = n < 0 ? "-" : "";
+  if (a >= 1e9) return sg + "Rp " + (a / 1e9).toFixed(2).replace(".", ",") + " mlr";
+  if (a >= 1e6) return sg + "Rp " + (a / 1e6).toFixed(1).replace(".", ",") + " jt";
+  return sg + "Rp " + Math.round(a).toLocaleString("id-ID");
+};
+const PALETTE = ["#3b82f6", "#f59e0b", "#22c55e", "#a855f7", "#ec4899", "#14b8a6"], OTHER_COLOR = "#94a3b8";
 function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 function devText(plan, actual) {
   const v = actual - plan;
@@ -498,7 +543,82 @@ function ytdChart(rows) {
   [0, 2, 5, 8, 11].forEach((i) => { const t = mkSvg("text", { x: x(i), y: H - 6, "text-anchor": i === 0 ? "start" : i === 11 ? "end" : "middle", "font-size": "11", fill: "var(--hint)" }); t.textContent = MONTHS[i]; svg.appendChild(t); });
   return svg;
 }
+function statBlock(title, sub, w) {
+  const card = mk("div", "card"); card.appendChild(mk("div", "k", title + " · " + sub));
+  const net = w.income - w.expense, rate = w.income > 0 ? Math.round((net / w.income) * 100) + "%" : "n/a";
+  const g = mk("div", "statgrid");
+  [["Income", rpc(w.income)], ["Spent", rpc(w.expense)], ["Net", rpc(net)], ["Saved", rate]].forEach(([k, v]) => {
+    const st = mk("div", "stat"); st.append(mk("span", "", k), mk("b", "", v)); g.appendChild(st);
+  });
+  card.appendChild(g); return card;
+}
+function renderNow(n) {
+  const box = el("dash-now"); box.replaceChildren();
+  if (!n) return;
+  const [y, m, dd] = n.date.split("-").map(Number);
+  box.append(statBlock("Today", dd + " " + MONTHS[m - 1], n.today), statBlock("This month", MONTHS[m - 1] + " " + y, n.month), statBlock("This year", "Jan to " + MONTHS[m - 1], n.year));
+  el("dash-now-note").textContent = n.repay_year ? "Loan repayments received this year (" + rpc(n.repay_year) + ") are kept out of income." : "";
+}
+function donutBlock(hostId, items, emptyText, ariaName) {
+  const host = el(hostId); host.replaceChildren();
+  const total = items.reduce((sum, i) => sum + i.amount, 0);
+  if (!total) { host.appendChild(mk("p", "hint", emptyText)); return; }
+  const shown = items.slice(0, 6), rest = items.slice(6).reduce((sum, i) => sum + i.amount, 0);
+  if (rest > 0) shown.push({ name: "Other", amount: rest });
+  const NS = "http://www.w3.org/2000/svg", R = 56, C = 2 * Math.PI * R;
+  const mkSvg = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+  const svg = mkSvg("svg", { viewBox: "0 0 160 160", class: "donut", role: "img", "aria-label": ariaName + ": " + shown.map((i) => i.name + " " + Math.round((i.amount / total) * 100) + "%").join(", ") });
+  svg.appendChild(mkSvg("circle", { cx: 80, cy: 80, r: R, fill: "none", stroke: "var(--secondary-bg)", "stroke-width": 24 }));
+  let acc = 0;
+  shown.forEach((it, i) => {
+    const len = (it.amount / total) * C, vis = Math.max(len - 1.5, 0.5);
+    svg.appendChild(mkSvg("circle", { cx: 80, cy: 80, r: R, fill: "none", stroke: it.name === "Other" ? OTHER_COLOR : PALETTE[i], "stroke-width": 24, "stroke-dasharray": vis + " " + (C - vis), "stroke-dashoffset": -acc, transform: "rotate(-90 80 80)" }));
+    acc += len;
+  });
+  const t1 = mkSvg("text", { x: 80, y: 82, "text-anchor": "middle", "font-size": 14, "font-weight": 700, fill: "var(--text)" }); t1.textContent = rpc(total);
+  const t2 = mkSvg("text", { x: 80, y: 98, "text-anchor": "middle", "font-size": 11, fill: "var(--hint)" }); t2.textContent = "total";
+  svg.append(t1, t2); host.appendChild(svg);
+  shown.forEach((it, i) => {
+    const row = mk("div", "lrow"), sw = mk("i"); sw.style.background = it.name === "Other" ? OTHER_COLOR : PALETTE[i]; sw.setAttribute("aria-hidden", "true");
+    const pct = (it.amount / total) * 100;
+    row.append(sw, mk("span", "n", it.name), mk("span", "p", pct < 1 ? "<1%" : Math.round(pct) + "%"), mk("span", "a", rpc(it.amount)));
+    host.appendChild(row);
+  });
+}
+function renderComposition(c) {
+  if (!c) return;
+  el("dash-period-note").textContent = c.period === "month" ? "Charts show " + MONTHS[dashMonth - 1] + " " + dashYear + "." : "Charts show January to " + MONTHS[dashMonth - 1] + " " + dashYear + ".";
+  donutBlock("dash-donut-exp", c.expense, "No spending logged for this period.", "Spending by category");
+  donutBlock("dash-donut-inc", c.income, "No income logged for this period.", "Income by category");
+}
+function renderTrend(rows, selMonth) {
+  const host = el("dash-trend"); host.replaceChildren();
+  if (!rows) return;
+  const W = 340, H = 170, L = 8, R = 8, T = 10, B = 24, pw = W - L - R, ph = H - T - B, step = pw / 12, bw = 9;
+  const max = Math.max(...rows.map((r) => Math.max(r.income, r.expense)), 1);
+  const NS = "http://www.w3.org/2000/svg";
+  const mkSvg = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+  const svg = mkSvg("svg", { viewBox: "0 0 " + W + " " + H, class: "chart", role: "img", "aria-label": "Income and spending by month: " + rows.filter((r) => r.income || r.expense).map((r) => MONTHS[r.month - 1] + " income " + rpc(r.income) + ", spent " + rpc(r.expense)).join("; ") });
+  svg.appendChild(mkSvg("line", { x1: L, x2: W - R, y1: T + ph, y2: T + ph, stroke: "var(--hint)", "stroke-opacity": 0.4 }));
+  const LET = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+  rows.forEach((r, i) => {
+    const x0 = L + i * step;
+    if (r.month === selMonth) svg.appendChild(mkSvg("rect", { x: x0, y: T, width: step, height: ph, fill: "var(--secondary-bg)", rx: 4 }));
+    const hi = (r.income / max) * ph, he = (r.expense / max) * ph;
+    svg.appendChild(mkSvg("rect", { x: x0 + step / 2 - bw - 1, y: T + ph - hi, width: bw, height: Math.max(hi, 0), fill: "var(--button)", rx: 2 }));
+    svg.appendChild(mkSvg("rect", { x: x0 + step / 2 + 1, y: T + ph - he, width: bw, height: Math.max(he, 0), fill: "#d97706", rx: 2 }));
+    const t = mkSvg("text", { x: x0 + step / 2, y: H - 7, "text-anchor": "middle", "font-size": 11, fill: "var(--hint)" }); t.textContent = LET[i]; svg.appendChild(t);
+  });
+  host.appendChild(svg);
+  const key = mk("div", "key");
+  const k1 = mk("span"), k2 = mk("span"), i1 = mk("i"), i2 = mk("i");
+  i1.style.background = "var(--button)"; i2.style.background = "#d97706";
+  k1.append(i1, document.createTextNode("Income")); k2.append(i2, document.createTextNode("Spent")); key.append(k1, k2); host.appendChild(key);
+  const sel = rows[selMonth - 1];
+  host.appendChild(mk("p", "hint", MONTHS[selMonth - 1] + ": income " + rpc(sel.income) + ", spent " + rpc(sel.expense) + "."));
+}
 function renderDashboard(d) {
+  renderNow(d.now); renderComposition(d.composition); renderTrend(d.trend, d.month);
   el("dash-month").textContent = MONTHS[d.month - 1] + " " + d.year;
   const t = d.totals, cards = el("dash-cards"); cards.replaceChildren();
   const pct = t.expense_plan ? Math.round((t.expense_actual / t.expense_plan) * 100) : null;
@@ -553,7 +673,7 @@ async function loadDashboard() {
   el("dash-month").textContent = MONTHS[dashMonth - 1] + " " + dashYear;
   el("dash-body").hidden = true; setDashMsg("Loading…");
   try {
-    const res = await fetch(`/api/dashboard?year=${dashYear}&month=${dashMonth}`, { headers: { "X-Telegram-Init-Data": initData } });
+    const res = await fetch(`/api/dashboard?year=${dashYear}&month=${dashMonth}&period=${dashPeriod}`, { headers: { "X-Telegram-Init-Data": initData } });
     const data = await res.json();
     if (seq !== dashSeq) return;
     if (!res.ok) throw new Error(data.error || "request failed");
@@ -569,6 +689,13 @@ function shiftMonth(delta) {
   if (dashMonth > 12) { dashMonth = 1; dashYear++; }
   loadDashboard();
 }
+function setPeriod(p) {
+  dashPeriod = p;
+  el("per-month").setAttribute("aria-pressed", String(p === "month")); el("per-year").setAttribute("aria-pressed", String(p === "year"));
+  loadDashboard();
+}
+el("per-month").addEventListener("click", () => setPeriod("month"));
+el("per-year").addEventListener("click", () => setPeriod("year"));
 el("dash-prev").addEventListener("click", () => shiftMonth(-1));
 el("dash-next").addEventListener("click", () => shiftMonth(1));
 
