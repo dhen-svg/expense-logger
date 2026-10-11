@@ -49,6 +49,8 @@ export async function onRequestGet(context) {
   let accounts = await fetchAll(env, "payment_accounts?select=id,name,currency,account_type&order=sort_order.asc,name.asc");
   if (!accounts) accounts = await fetchAll(env, "payment_accounts?select=id,name&order=sort_order.asc,name.asc");
   if (!cats || !subs || !budgets || !ledger || !accounts) return json({ error: "could not load data" }, 502);
+  // Optional: the income plan. If the table does not exist yet, the Budget view simply has no income plan.
+  const incomePlan = await fetchAll(env, `income_plan?year=eq.${year}&select=category_id,subcategory_id,month,planned_amount`);
   // "Right now" always means the current year, whatever month is being explored.
   const ledgerNow = year === nowY ? ledger : await fetchAll(env, ledgerPath(nowY));
   if (!ledgerNow) return json({ error: "could not load data" }, 502);
@@ -99,15 +101,23 @@ export async function onRequestGet(context) {
     trend[monthOf(r.expense_date) - 1][k] += n(r.amount);
   }
 
-  // ---- Plan against actual for the chosen month (expense side; the plan table holds expenses)
+  // ---- Plan against actual for the chosen period (expenses from budgets, income from income_plan)
+  const inP = (m) => (period === "month" ? m === month : m <= month);
   const planByMonth = Array(13).fill(0), actualExpByMonth = Array(13).fill(0);
-  const planBySub = new Map(), actualBySub = new Map();
+  const planBySub = new Map(), actualBySub = new Map(), incPlanCat = new Map(), incActCat = new Map();
   let incomeActual = 0, firstActual = null, entriesInMonth = 0;
   for (const b of budgets) {
     const cat = catById.get(b.category_id);
     if (cat && cat.type === "income") continue;
     planByMonth[b.month] += n(b.planned_amount);
-    if (b.month === month) planBySub.set(b.subcategory_id ?? `c${b.category_id}`, (planBySub.get(b.subcategory_id ?? `c${b.category_id}`) || 0) + n(b.planned_amount));
+    if (inP(b.month)) { const key = b.subcategory_id ?? `c${b.category_id}`; planBySub.set(key, (planBySub.get(key) || 0) + n(b.planned_amount)); }
+  }
+  if (incomePlan) {
+    for (const b of incomePlan) {
+      const cat = catById.get(b.category_id);
+      if (!inP(b.month) || !cat || cat.name === "Debt Repayment") continue;
+      incPlanCat.set(b.category_id, (incPlanCat.get(b.category_id) || 0) + n(b.planned_amount));
+    }
   }
   for (const r of ledger) {
     const m = monthOf(r.expense_date);
@@ -115,9 +125,12 @@ export async function onRequestGet(context) {
     if (m === month) entriesInMonth++;
     const k = kindOf(r);
     if (k === "repay") continue;
-    if (k === "income") { if (m === month) incomeActual += n(r.amount); continue; }
+    if (k === "income") {
+      if (inP(m)) { incomeActual += n(r.amount); incActCat.set(r.category_id, (incActCat.get(r.category_id) || 0) + n(r.amount)); }
+      continue;
+    }
     actualExpByMonth[m] += n(r.amount);
-    if (m === month) actualBySub.set(r.subcategory_id, (actualBySub.get(r.subcategory_id) || 0) + n(r.amount));
+    if (inP(m)) actualBySub.set(r.subcategory_id, (actualBySub.get(r.subcategory_id) || 0) + n(r.amount));
   }
 
   const catRows = new Map();
@@ -162,13 +175,22 @@ export async function onRequestGet(context) {
     ytd.push({ month: m, plan: cp, actual: m <= shown ? ca : null });
   }
 
-  const expensePlan = planByMonth[month], expenseActual = actualExpByMonth[month];
+  let expensePlan = 0, expenseActual = 0;
+  for (let m = 1; m <= 12; m++) if (inP(m)) { expensePlan += planByMonth[m]; expenseActual += actualExpByMonth[m]; }
+  let incomeBudget = null;
+  if (incomePlan) {
+    const ids = new Set([...incPlanCat.keys(), ...incActCat.keys()]);
+    const catsOut = [...ids].map((id) => ({ name: catById.get(id)?.name || "Income", plan: incPlanCat.get(id) || 0, actual: incActCat.get(id) || 0 }))
+      .map((c) => ({ ...c, variance: c.actual - c.plan })).sort((a, b) => Math.max(b.plan, b.actual) - Math.max(a.plan, a.actual));
+    const planTotal = catsOut.reduce((sum, c) => sum + c.plan, 0);
+    incomeBudget = { plan: planTotal, actual: incomeActual, variance: incomeActual - planTotal, categories: catsOut };
+  }
   return json({
     year, month, period,
     now: nowBlock,
     composition, trend,
     totals: { expense_plan: expensePlan, expense_actual: expenseActual, expense_variance: expenseActual - expensePlan, income_actual: incomeActual, net_actual: incomeActual - expenseActual },
-    categories, top_variances: topVariances, ytd, accounts: accountsOut,
+    categories, top_variances: topVariances, income_budget: incomeBudget, ytd, accounts: accountsOut,
     meta: { entries_in_month: entriesInMonth, first_entry_date: firstActual, transfers_available: transfers !== null },
   });
 }

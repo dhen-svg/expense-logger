@@ -166,46 +166,63 @@
   </div>
 
   <div id="view-dash" hidden>
+    <div class="seg" id="dash-tabs" role="group" aria-label="Dashboard view">
+      <button type="button" id="dt-cash" aria-pressed="true">Cashflow</button>
+      <button type="button" id="dt-budget" aria-pressed="false">Budget</button>
+      <button type="button" id="dt-assets" aria-pressed="false">Assets</button>
+    </div>
     <div id="dash-msg" class="dmsg" role="status"></div>
     <div id="dash-body" hidden>
-      <h2 style="margin-top:4px">Right now</h2>
-      <div class="cards" id="dash-now"></div>
-      <p class="hint" id="dash-now-note"></p>
 
-      <h2>Explore</h2>
-      <div class="monthnav">
-        <button type="button" id="dash-prev" aria-label="Previous month">&lsaquo;</button>
-        <div id="dash-month" class="monthlabel" aria-live="polite"></div>
-        <button type="button" id="dash-next" aria-label="Next month">&rsaquo;</button>
-      </div>
-      <div class="seg periodbar" id="dash-period" role="group" aria-label="Period">
-        <button type="button" id="per-month" aria-pressed="true">Month</button>
-        <button type="button" id="per-year" aria-pressed="false">Year to date</button>
-      </div>
-      <p class="hint" id="dash-period-note"></p>
+      <section id="dp-cash">
+        <h2 style="margin-top:12px">Right now</h2>
+        <div class="cards" id="dash-now"></div>
+        <p class="hint" id="dash-now-note"></p>
+        <div id="slot-cash">
+          <div id="dash-controls">
+            <h2>Explore</h2>
+            <div class="monthnav">
+              <button type="button" id="dash-prev" aria-label="Previous month">&lsaquo;</button>
+              <div id="dash-month" class="monthlabel" aria-live="polite"></div>
+              <button type="button" id="dash-next" aria-label="Next month">&rsaquo;</button>
+            </div>
+            <div class="seg periodbar" id="dash-period" role="group" aria-label="Period">
+              <button type="button" id="per-month" aria-pressed="true">Month</button>
+              <button type="button" id="per-year" aria-pressed="false">Year to date</button>
+            </div>
+            <p class="hint" id="dash-period-note"></p>
+          </div>
+        </div>
+        <h2>Where the money goes</h2>
+        <div id="dash-donut-exp"></div>
+        <h2>Where the money comes from</h2>
+        <div id="dash-donut-inc"></div>
+        <h2>Month by month</h2>
+        <div id="dash-trend"></div>
+        <h2>Money in and out, by account</h2>
+        <div id="dash-acc"></div>
+      </section>
 
-      <h2>Where the money goes</h2>
-      <div id="dash-donut-exp"></div>
-      <h2>Where the money comes from</h2>
-      <div id="dash-donut-inc"></div>
-      <h2>Month by month</h2>
-      <div id="dash-trend"></div>
-
-      <h2>Money in and out, by account</h2>
-      <div id="dash-acc"></div>
-
-      <details class="plan" id="dash-plan">
-        <summary>Against plan (built on assumptions)</summary>
+      <section id="dp-budget" hidden>
+        <div id="slot-budget"></div>
+        <h2>Spending against plan</h2>
         <div class="cards" id="dash-cards"></div>
-        <h2>Plan against actual, by category</h2>
+        <h2>By category</h2>
         <p class="hint" id="dash-cat-hint">Tap a category to see its subcategories.</p>
         <div id="dash-cats"></div>
+        <h2>Income against plan</h2>
+        <div id="dash-income-plan"></div>
         <h2>Biggest deviations</h2>
         <div id="dash-top"></div>
-        <h2>Year to date</h2>
+        <h2>Year to date, whole year</h2>
         <div id="dash-ytd"></div>
-        <p class="hint">Deviations from the plan are normal. They show what to learn, not what to fix. Income has no plan in this view yet.</p>
-      </details>
+        <p class="hint">The plan is built on assumptions. Deviations are normal and show what to learn, not what to fix.</p>
+      </section>
+
+      <section id="dp-assets" hidden>
+        <h2 style="margin-top:12px">Net worth and assets</h2>
+        <p class="hint">Not connected yet. Your month-end snapshots live in Excel, not in the database, so this view has nothing to draw. Once a snapshot is loaded each month-end, this tab shows net worth over time, what you own by class, emergency fund progress against its targets and the investment split.</p>
+      </section>
     </div>
   </div>
 
@@ -492,7 +509,7 @@ el("save").addEventListener("click", async () => {
 
 // ---------------- Dashboard ----------------
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-let dashYear = new Date().getFullYear(), dashMonth = new Date().getMonth() + 1, dashSeq = 0, dashPeriod = "month";
+let dashYear = new Date().getFullYear(), dashMonth = new Date().getMonth() + 1, dashSeq = 0, dashPeriod = "month", dashTab = "cash";
 const rp = (n) => (n < 0 ? "-" : "") + "Rp " + Math.round(Math.abs(n)).toLocaleString("id-ID");
 const fmtNat = (n, cur) => (cur === "IDR" ? rp(n) : cur + " " + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const rpc = (n) => {
@@ -587,7 +604,7 @@ function donutBlock(hostId, items, emptyText, ariaName) {
 }
 function renderComposition(c) {
   if (!c) return;
-  el("dash-period-note").textContent = c.period === "month" ? "Charts show " + MONTHS[dashMonth - 1] + " " + dashYear + "." : "Charts show January to " + MONTHS[dashMonth - 1] + " " + dashYear + ".";
+  el("dash-period-note").textContent = c.period === "month" ? "Showing " + MONTHS[dashMonth - 1] + " " + dashYear + "." : "Showing January to " + MONTHS[dashMonth - 1] + " " + dashYear + ".";
   donutBlock("dash-donut-exp", c.expense, "No spending logged for this period.", "Spending by category");
   donutBlock("dash-donut-inc", c.income, "No income logged for this period.", "Income by category");
 }
@@ -617,15 +634,37 @@ function renderTrend(rows, selMonth) {
   const sel = rows[selMonth - 1];
   host.appendChild(mk("p", "hint", MONTHS[selMonth - 1] + ": income " + rpc(sel.income) + ", spent " + rpc(sel.expense) + "."));
 }
+function renderIncomePlan(ib) {
+  const host = el("dash-income-plan"); host.replaceChildren();
+  if (!ib) { host.appendChild(mk("p", "hint", "No income plan loaded yet. Run migration_v5_income_plan.sql to add it.")); return; }
+  const card = mk("div", "card"), dv = devText(ib.plan, ib.actual);
+  card.append(mk("div", "k", "Income against plan"), mk("div", "v", rp(ib.actual)), mk("div", "s", "Plan " + rp(ib.plan)), bar(ib.plan, ib.actual), mk("div", "dev " + (ib.actual < ib.plan ? "over" : "under"), ib.plan === 0 ? dv.t : (ib.actual < ib.plan ? "Short by " + rp(ib.plan - ib.actual) : ib.actual > ib.plan ? "Ahead by " + rp(ib.actual - ib.plan) : "On plan")));
+  host.appendChild(card);
+  for (const c of ib.categories) {
+    const row = mk("div", "sub"), r = mk("div", "crow"); r.append(mk("b", "", c.name), mk("span", "", rp(c.actual) + " of " + rp(c.plan)));
+    row.append(r, bar(c.plan, c.actual)); host.appendChild(row);
+  }
+  host.appendChild(mk("p", "hint", "Loan repayments received are not counted as income. Income is gross, before Pph21 and payslip deductions."));
+}
+function setDashTab(t) {
+  dashTab = t;
+  [["cash", "dt-cash", "dp-cash"], ["budget", "dt-budget", "dp-budget"], ["assets", "dt-assets", "dp-assets"]].forEach(([k, b, panel]) => {
+    el(b).setAttribute("aria-pressed", String(k === t)); el(panel).hidden = k !== t;
+  });
+  const ctl = el("dash-controls");
+  if (t === "budget") el("slot-budget").appendChild(ctl); else el("slot-cash").appendChild(ctl);
+  ctl.hidden = t === "assets";
+  window.scrollTo({ top: 0 });
+}
 function renderDashboard(d) {
-  renderNow(d.now); renderComposition(d.composition); renderTrend(d.trend, d.month);
+  renderNow(d.now); renderComposition(d.composition); renderTrend(d.trend, d.month); renderIncomePlan(d.income_budget);
   el("dash-month").textContent = MONTHS[d.month - 1] + " " + d.year;
   const t = d.totals, cards = el("dash-cards"); cards.replaceChildren();
   const pct = t.expense_plan ? Math.round((t.expense_actual / t.expense_plan) * 100) : null;
   const c1 = mk("div", "card"); c1.append(mk("div", "k", "Spent against plan"), mk("div", "v", rp(t.expense_actual)),
     mk("div", "s", "Plan " + rp(t.expense_plan) + (pct === null ? "" : " · " + pct + "% used")), bar(t.expense_plan, t.expense_actual),
     mk("div", "dev " + devText(t.expense_plan, t.expense_actual).c, devText(t.expense_plan, t.expense_actual).t));
-  const c2 = mk("div", "card"); c2.append(mk("div", "k", "Income logged"), mk("div", "v", rp(t.income_actual)), mk("div", "s", "No plan for income yet"));
+  const c2 = mk("div", "card"); c2.append(mk("div", "k", "Income logged"), mk("div", "v", rp(t.income_actual)), mk("div", "s", d.income_budget ? "Plan " + rp(d.income_budget.plan) : "No plan for income yet"));
   const c3 = mk("div", "card"); c3.append(mk("div", "k", "Income minus spending"), mk("div", "v", rp(t.net_actual)), mk("div", "s", "Before transfers to investments"));
   cards.append(c1, c2, c3);
 
@@ -694,6 +733,9 @@ function setPeriod(p) {
   el("per-month").setAttribute("aria-pressed", String(p === "month")); el("per-year").setAttribute("aria-pressed", String(p === "year"));
   loadDashboard();
 }
+el("dt-cash").addEventListener("click", () => setDashTab("cash"));
+el("dt-budget").addEventListener("click", () => setDashTab("budget"));
+el("dt-assets").addEventListener("click", () => setDashTab("assets"));
 el("per-month").addEventListener("click", () => setPeriod("month"));
 el("per-year").addEventListener("click", () => setPeriod("year"));
 el("dash-prev").addEventListener("click", () => shiftMonth(-1));
